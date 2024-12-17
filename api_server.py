@@ -94,26 +94,46 @@ async def get_output_images(request: Request):
         return error_resp(500, str(e))
 
 
-@routes.delete("/comfyapi/v1/output-images/{filename}")
+from pathlib import Path
+import asyncio
+import time
+import logging
+
+OUTPUT_BASE_DIR = Path('/network/ComfyUI/output')
+DELETE_THRESHOLD_MINUTES = 15
+@routes.delete("/comfyapi/v1/output-images")
 async def delete_output_images(request: Request):
     try:
-        filename = request.match_info.get("filename")
-        if filename is None:
-            return error_resp(400, "filename is required")
+        current_time = time.time()
+        threshold = current_time - (DELETE_THRESHOLD_MINUTES * 60)
 
-        if filename[0] == "/" or ".." in filename:
-            return error_resp(400, "invalid filename")
+        # Find all files older than threshold in all subfolders
+        to_delete = [
+            f for f in OUTPUT_BASE_DIR.rglob('*')
+            if f.is_file() and f.stat().st_mtime < threshold
+        ]
 
-        is_temp = request.rel_url.query.get("temp", "false") == "true"
-        annotated_file = f"{filename} [{'temp' if is_temp else 'output'}]"
-        if not folder_paths.exists_annotated_filepath(annotated_file):
-            return error_resp(404, f"file {filename} not found")
+        # Count files per directory before deletion
+        dir_counts = {}
+        for file in to_delete:
+            subfolder = str(file.parent.relative_to(OUTPUT_BASE_DIR))
+            dir_counts[subfolder] = dir_counts.get(subfolder, 0) + 1
 
-        filepath = folder_paths.get_annotated_filepath(annotated_file)
-        os.remove(filepath)
-        return success_resp()
+        # Delete files concurrently
+        if to_delete:
+            await asyncio.gather(*[
+                asyncio.to_thread(f.unlink) for f in to_delete
+            ])
+
+        return success_resp(
+            total_deleted=len(to_delete),
+            directory_summary=dir_counts
+        )
+
+    except PermissionError:
+        return error_resp(403, "Permission denied accessing the output directory")
     except Exception as e:
-        return error_resp(500, str(e))
+        logging.error(f"Error deleting files: {str(e)}")
 
 
 @routes.post("/comfyapi/v1/pnginfo")

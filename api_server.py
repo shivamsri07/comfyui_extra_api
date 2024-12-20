@@ -99,16 +99,14 @@ import asyncio
 import time
 import logging
 
+
+OUTPUT_BASE_DIR = Path('/workspace/ComfyUI/output')
 DELETE_THRESHOLD_MINUTES = 15
 @routes.delete("/comfyapi/v1/output-images")
 async def delete_output_images(request: Request):
     try:
         current_time = time.time()
         threshold = current_time - (DELETE_THRESHOLD_MINUTES * 60)
-
-        root_path = request.rel_url.query.get("root_path")
-
-        OUTPUT_BASE_DIR = Path(f'/{root_path}/ComfyUI/output')
 
         # Find all files older than threshold in all subfolders
         to_delete = [
